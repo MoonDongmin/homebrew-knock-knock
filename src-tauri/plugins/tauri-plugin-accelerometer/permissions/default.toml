@@ -1,0 +1,8 @@
+[default]
+description = "Allows accessing the accelerometer"
+permissions = [
+    "allow-start-stream",
+    "allow-stop-stream",
+    "allow-is-available",
+    "allow-calibrate",
+]
