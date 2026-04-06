@@ -18,14 +18,18 @@
 
 ## What is KnockKnock?
 
-KnockKnock turns your MacBook into a tap-sensitive automation tool. Tap your desk — and your Mac responds.
+KnockKnock turns your MacBook into a tap-sensitive automation tool. Tap your desk — and your Mac responds. No external hardware, no special setup — just your MacBook and your fingertips.
+
+Your Apple Silicon MacBook has a built-in accelerometer that most people don't even know about. KnockKnock uses this hidden sensor to detect physical taps on your desk and translate them into system actions.
 
 - **2 taps** — Play/Pause media
 - **3 taps** — Next track
 - **4 taps** — Launch an app
-- **...and more** — Fully customizable up to 7 taps
+- **5+ taps** — Whatever you want — fully customizable up to 7 taps
 
-Built with Apple Silicon's built-in accelerometer (no external hardware needed).
+Every tap pattern is configurable. Map them to media controls, app launches, keyboard shortcuts, or any combination you like.
+
+Inspired by [SlapMac](https://github.com/nickytonline/SlapMac) — a fun idea of interacting with your Mac through physical gestures.
 
 ## Install
 
@@ -80,9 +84,9 @@ bun run check
 
 Rust handles minimal hardware bridging (accelerometer access, key simulation). All business logic — tap detection, pattern matching, action mapping — lives in TypeScript.
 
-## Inspiration
+## Feature Requests
 
-This project was inspired by [SlapMac](https://github.com/nickytonline/SlapMac) — a fun idea of interacting with your Mac through physical gestures.
+Want a new tap action? Have an idea for a feature? [Open an issue](https://github.com/MoonDongmin/knock-knock/issues) — all suggestions are welcome!
 
 ## License
 
