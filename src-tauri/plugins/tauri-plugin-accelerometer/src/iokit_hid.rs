@@ -10,17 +10,25 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::runloop::{CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopRun, CFRunLoopStop};
 use core_foundation::string::CFString;
-use core_foundation_sys::base::{CFAllocatorRef, CFIndex};
+use core_foundation_sys::base::{CFAllocatorRef, CFIndex, CFTypeRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_foundation_sys::runloop::kCFRunLoopDefaultMode;
 use core_foundation_sys::set::CFSetRef;
-use std::ffi::c_void;
+use core_foundation_sys::string::CFStringRef;
+use std::ffi::{c_char, c_void};
 
 // IOKit HID opaque types
 pub type IOHIDManagerRef = *mut c_void;
 pub type IOHIDDeviceRef = *mut c_void;
 type IOOptionBits = u32;
 type IOReturn = i32;
+
+// IOKit service types
+type MachPort = u32;
+type IoIterator = u32;
+type IoObject = u32;
+type KernReturn = i32;
+const KERN_SUCCESS: KernReturn = 0;
 
 /// HID report callback signature
 pub type IOHIDReportCallback = extern "C" fn(
@@ -53,13 +61,30 @@ unsafe extern "C" {
         run_loop: CFRunLoopRef,
         run_loop_mode: *const c_void,
     );
-    fn IOHIDDeviceRegisterInputReportCallback(
-        device: IOHIDDeviceRef,
-        report: *mut u8,
-        report_length: CFIndex,
+    fn IOHIDManagerRegisterInputReportCallback(
+        manager: IOHIDManagerRef,
         callback: IOHIDReportCallback,
         context: *mut c_void,
     );
+    fn IOHIDDeviceGetProperty(device: IOHIDDeviceRef, key: *const c_void) -> *const c_void;
+}
+
+// IOKit service registry functions (for waking SPU drivers)
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    fn IOServiceMatching(name: *const c_char) -> CFDictionaryRef;
+    fn IOServiceGetMatchingServices(
+        main_port: MachPort,
+        matching: CFDictionaryRef,
+        existing: *mut IoIterator,
+    ) -> KernReturn;
+    fn IOIteratorNext(iterator: IoIterator) -> IoObject;
+    fn IORegistryEntrySetCFProperty(
+        entry: IoObject,
+        property_name: CFStringRef,
+        property: CFTypeRef,
+    ) -> KernReturn;
+    fn IOObjectRelease(object: IoObject) -> KernReturn;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -129,6 +154,61 @@ fn collect_devices_from_set(set_ref: CFSetRef) -> Vec<IOHIDDeviceRef> {
     devices
 }
 
+/// Wake the SPU sensor drivers so they start generating HID reports.
+/// Must be called before opening HID devices. Requires root permission.
+pub fn wake_spu_drivers() -> Result<u32, String> {
+    unsafe {
+        let matching = IOServiceMatching(b"AppleSPUHIDDriver\0".as_ptr().cast());
+        if matching.is_null() {
+            return Err("IOServiceMatching(AppleSPUHIDDriver) returned null".into());
+        }
+
+        let mut iterator: IoIterator = 0;
+        let ret = IOServiceGetMatchingServices(0, matching, &mut iterator);
+        // Note: IOServiceGetMatchingServices consumes the matching dict
+        if ret != KERN_SUCCESS {
+            return Err(format!("IOServiceGetMatchingServices failed: {ret}"));
+        }
+
+        let key_reporting = CFString::new("SensorPropertyReportingState");
+        let key_power = CFString::new("SensorPropertyPowerState");
+        let key_interval = CFString::new("ReportInterval");
+        let val_one = CFNumber::from(1i32);
+        let val_interval = CFNumber::from(1000i32); // 1000 microseconds = 1kHz
+
+        let mut count: u32 = 0;
+        loop {
+            let service = IOIteratorNext(iterator);
+            if service == 0 {
+                break;
+            }
+
+            IORegistryEntrySetCFProperty(
+                service,
+                key_reporting.as_concrete_TypeRef(),
+                val_one.as_concrete_TypeRef().cast(),
+            );
+            IORegistryEntrySetCFProperty(
+                service,
+                key_power.as_concrete_TypeRef(),
+                val_one.as_concrete_TypeRef().cast(),
+            );
+            IORegistryEntrySetCFProperty(
+                service,
+                key_interval.as_concrete_TypeRef(),
+                val_interval.as_concrete_TypeRef().cast(),
+            );
+
+            IOObjectRelease(service);
+            count += 1;
+        }
+
+        IOObjectRelease(iterator);
+        eprintln!("[HID] Woke {count} AppleSPUHIDDriver service(s)");
+        Ok(count)
+    }
+}
+
 /// Check if an accelerometer HID device is present (does not require root).
 pub fn is_device_available() -> bool {
     unsafe {
@@ -158,7 +238,6 @@ pub fn is_device_available() -> bool {
 pub struct StreamContext {
     pub callback: Box<dyn Fn(AccelSample) + Send>,
     pub sample_counter: std::sync::atomic::AtomicU64,
-    pub report_buffer: [u8; REPORT_LENGTH],
 }
 
 /// A Send-safe wrapper for CFRunLoopRef, which is safe to stop from another thread.
@@ -191,68 +270,81 @@ impl HidStream {
         run_loop_out: &std::sync::Arc<std::sync::Mutex<Option<SendableRunLoop>>>,
     ) -> Result<(), String> {
         unsafe {
+            // 0. Wake SPU sensor drivers (required for reports to flow)
+            if let Err(e) = wake_spu_drivers() {
+                eprintln!("[HID] Warning: failed to wake SPU drivers: {e}");
+            }
+
+            // 1. Create manager
+            eprintln!("[HID] Creating IOHIDManager...");
             let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0);
             if manager.is_null() {
                 return Err("Failed to create IOHIDManager".into());
             }
 
+            // 2. Set matching dictionary
             let matching = build_matching_dict();
             IOHIDManagerSetDeviceMatching(manager, matching.as_concrete_TypeRef().cast());
 
+            // 3. Register input report callback on MANAGER (before schedule & open)
+            let context = Box::into_raw(Box::new(StreamContext {
+                callback,
+                sample_counter: std::sync::atomic::AtomicU64::new(0),
+            }));
+            IOHIDManagerRegisterInputReportCallback(
+                manager,
+                hid_report_callback,
+                context.cast(),
+            );
+            eprintln!("[HID] Manager-level input report callback registered");
+
+            // 4. Schedule with run loop
+            let run_loop = CFRunLoopGetCurrent();
+            IOHIDManagerScheduleWithRunLoop(manager, run_loop, kCFRunLoopDefaultMode.cast());
+            eprintln!("[HID] Manager scheduled with run loop");
+
+            // 5. Open manager (opens all matched devices)
+            eprintln!("[HID] Opening IOHIDManager...");
             let ret = IOHIDManagerOpen(manager, 0);
             if ret != 0 {
+                IOHIDManagerUnscheduleFromRunLoop(manager, run_loop, kCFRunLoopDefaultMode.cast());
                 CFRelease(manager.cast());
+                drop(Box::from_raw(context));
                 return Err(format!(
                     "IOHIDManagerOpen failed with code {ret}. Root permission required."
                 ));
             }
+            eprintln!("[HID] IOHIDManager opened successfully");
 
+            // Log matched devices for diagnostics
             let device_set_ref = IOHIDManagerCopyDevices(manager);
-            if device_set_ref.is_null() {
-                IOHIDManagerClose(manager, 0);
-                CFRelease(manager.cast());
-                return Err("No accelerometer device found".into());
+            if !device_set_ref.is_null() {
+                let devices = collect_devices_from_set(device_set_ref);
+                eprintln!("[HID] Found {} matching device(s)", devices.len());
+                let product_key = CFString::new("Product");
+                for (i, &device) in devices.iter().enumerate() {
+                    let name_ref = IOHIDDeviceGetProperty(device, product_key.as_concrete_TypeRef().cast());
+                    let name = if name_ref.is_null() {
+                        "<unknown>".to_string()
+                    } else {
+                        CFString::wrap_under_get_rule(name_ref as core_foundation::string::CFStringRef).to_string()
+                    };
+                    eprintln!("[HID] Device {i}: {name}");
+                }
+                CFRelease(device_set_ref.cast());
             }
-
-            let devices = collect_devices_from_set(device_set_ref);
-            CFRelease(device_set_ref.cast());
-
-            if devices.is_empty() {
-                IOHIDManagerClose(manager, 0);
-                CFRelease(manager.cast());
-                return Err("No accelerometer device found".into());
-            }
-
-            // Create context on the heap — cleaned up after run loop exits
-            let context = Box::into_raw(Box::new(StreamContext {
-                callback,
-                sample_counter: std::sync::atomic::AtomicU64::new(0),
-                report_buffer: [0u8; REPORT_LENGTH],
-            }));
-
-            // Register callback for each matching device
-            for &device in &devices {
-                IOHIDDeviceRegisterInputReportCallback(
-                    device,
-                    &raw mut (*context).report_buffer as *mut u8,
-                    REPORT_LENGTH as CFIndex,
-                    hid_report_callback,
-                    context.cast(),
-                );
-            }
-
-            let run_loop = CFRunLoopGetCurrent();
-            IOHIDManagerScheduleWithRunLoop(manager, run_loop, kCFRunLoopDefaultMode.cast());
 
             // Expose the run loop so another thread can stop it
             if let Ok(mut lock) = run_loop_out.lock() {
                 *lock = Some(SendableRunLoop(run_loop));
             }
 
-            // Block until CFRunLoopStop is called from another thread
+            // 6. Block until CFRunLoopStop is called from another thread
+            eprintln!("[HID] CFRunLoopRun starting — waiting for HID reports...");
             CFRunLoopRun();
+            eprintln!("[HID] CFRunLoopRun exited");
 
-            // Cleanup after run loop exits
+            // Cleanup
             IOHIDManagerUnscheduleFromRunLoop(manager, run_loop, kCFRunLoopDefaultMode.cast());
             IOHIDManagerClose(manager, 0);
             CFRelease(manager.cast());
@@ -283,6 +375,11 @@ extern "C" fn hid_report_callback(
     let count = ctx
         .sample_counter
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    if count == 0 {
+        eprintln!("[HID] First HID report received (length={})", report_length);
+    }
+
     if count % 8 != 0 {
         return;
     }
@@ -291,5 +388,7 @@ extern "C" fn hid_report_callback(
 
     if let Some(sample) = parse_report(report_slice) {
         (ctx.callback)(sample);
+    } else if count < 80 {
+        eprintln!("[HID] Failed to parse report (length={}, count={})", report_length, count);
     }
 }

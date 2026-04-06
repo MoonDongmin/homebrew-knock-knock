@@ -371,5 +371,11 @@ dist
 ### Rust / Tauri ###
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/plugins/*/target/
+src-tauri/plugins/*/Cargo.lock
+
+### Project ###
+_workspace/
+plan/
 
 # End of https://www.toptal.com/developers/gitignore/api/webstorm,node,jetbrains,macos
