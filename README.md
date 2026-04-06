@@ -80,6 +80,10 @@ bun run check
 
 Rust handles minimal hardware bridging (accelerometer access, key simulation). All business logic — tap detection, pattern matching, action mapping — lives in TypeScript.
 
+## Inspiration
+
+This project was inspired by [SlapMac](https://github.com/nickytonline/SlapMac) — a fun idea of interacting with your Mac through physical gestures.
+
 ## License
 
 MIT
