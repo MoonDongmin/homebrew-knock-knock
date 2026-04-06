@@ -30,20 +30,21 @@ Your Apple Silicon MacBook has a built-in accelerometer that most people don't e
 Every tap pattern is configurable. Map them to media controls, app launches, keyboard shortcuts, or any combination you like.
 
 Inspired by [SlapMac](https://github.com/nickytonline/SlapMac) — a fun idea of interacting with your Mac through physical gestures.
-
+<br>
 ## Install
 
 ### Homebrew (recommended)
 
 ```bash
-brew tap MoonDongmin/knock-knock https://github.com/MoonDongmin/knock-knock.git
+brew tap MoonDongmin/knock-knock
 brew install --cask knock-knock
 ```
+<br>
 
 ### Manual
 
 Download the latest `.dmg` from [Releases](https://github.com/MoonDongmin/knock-knock/releases).
-
+<br>
 ### macOS Gatekeeper notice
 
 On first launch, macOS may show **"KnockKnock is damaged and can't be opened."** This happens because the app is not code-signed with an Apple Developer certificate. The app is completely safe — you can review the full source code in this repository.
@@ -53,6 +54,7 @@ To fix this, run the following command after installation:
 ```bash
 xattr -cr /Applications/KnockKnock.app
 ```
+<br>
 
 ## Requirements
 
@@ -60,15 +62,19 @@ xattr -cr /Applications/KnockKnock.app
 - Apple Silicon Mac (M1/M2/M3/M4)
 - Administrator password (required for accelerometer access)
 
+<br>
+
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| App Framework | Tauri v2 |
-| Backend | Rust (IOKit HID, CGEvent) |
-| Frontend | TypeScript + React |
-| UI | Tailwind CSS |
-| Build | Vite + Bun |
+
+| Layer         | Technology                |
+| ------------- | ------------------------- |
+| App Framework | Tauri v2                  |
+| Backend       | Rust (IOKit HID, CGEvent) |
+| Frontend      | TypeScript + React        |
+| UI            | Tailwind CSS              |
+| Build         | Vite + Bun                |
+<br>
 
 ## Development
 
@@ -85,6 +91,7 @@ bun run tauri build
 # Lint & format
 bun run check
 ```
+<br>
 
 ## Architecture
 
@@ -93,10 +100,12 @@ bun run check
 ```
 
 Rust handles minimal hardware bridging (accelerometer access, key simulation). All business logic — tap detection, pattern matching, action mapping — lives in TypeScript.
+<br>
 
 ## Feature Requests
 
 Want a new tap action? Have an idea for a feature? [Open an issue](https://github.com/MoonDongmin/knock-knock/issues) — all suggestions are welcome!
+<br>
 
 ## License
 
