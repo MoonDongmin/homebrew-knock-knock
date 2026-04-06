@@ -36,13 +36,23 @@ Inspired by [SlapMac](https://github.com/nickytonline/SlapMac) — a fun idea of
 ### Homebrew (recommended)
 
 ```bash
-brew tap MoonDongmin/knock-knock
+brew tap MoonDongmin/knock-knock https://github.com/MoonDongmin/knock-knock.git
 brew install --cask knock-knock
 ```
 
 ### Manual
 
 Download the latest `.dmg` from [Releases](https://github.com/MoonDongmin/knock-knock/releases).
+
+### macOS Gatekeeper notice
+
+On first launch, macOS may show **"KnockKnock is damaged and can't be opened."** This happens because the app is not code-signed with an Apple Developer certificate. The app is completely safe — you can review the full source code in this repository.
+
+To fix this, run the following command after installation:
+
+```bash
+xattr -cr /Applications/KnockKnock.app
+```
 
 ## Requirements
 
