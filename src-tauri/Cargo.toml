@@ -1,11 +1,16 @@
 [package]
 name = "knock-knock"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+default-run = "knock-knock"
 
 [lib]
 name = "knock_knock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "knockknock-helper"
+path = "src/bin/knockknock-helper.rs"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

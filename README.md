@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
   <img src="https://img.shields.io/badge/Apple%20Silicon-only-blue" alt="Apple Silicon">
-  <img src="https://img.shields.io/badge/version-0.1.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.1.1-green" alt="Version">
 </p>
 
 ---
@@ -56,11 +56,17 @@ xattr -cr /Applications/KnockKnock.app
 ```
 <br>
 
+### Administrator privileges
+
+KnockKnock requires **administrator privileges** to access the MacBook's built-in accelerometer (IOKit HID). On first launch, a macOS password dialog will appear — this is a one-time prompt per session.
+
+<br>
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later
 - Apple Silicon Mac (M1/M2/M3/M4)
-- Administrator password (required for accelerometer access)
+- Administrator password (prompted on launch for accelerometer access)
 
 <br>
 
@@ -82,7 +88,7 @@ xattr -cr /Applications/KnockKnock.app
 # Install dependencies
 bun install
 
-# Run in development
+# Run in development (password dialog will appear for accelerometer)
 bun run tauri dev
 
 # Build for production
