@@ -1,6 +1,6 @@
 cask "knock-knock" do
   version "1.0.0"
-  sha256 "ce568776b07f4a7a28e170a0da368668a218d2516c9d0464658e50bd71114a69"
+  sha256 "33ed775e5b65ec4ac937cc1013d68d7d1d5dafd8d3cb32ad457fec999318a2d5"
 
   url "https://github.com/MoonDongmin/knock-knock/releases/download/v#{version}/KnockKnock_#{version}_aarch64.dmg"
   name "KnockKnock"
