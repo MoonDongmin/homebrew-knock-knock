@@ -5,7 +5,6 @@ import type { CalibrationBaseline, TapCount } from "../lib/types";
 
 interface UseTapDetectorOptions {
 	enabled: boolean;
-	sensitivity: number;
 	baseline: CalibrationBaseline | null;
 	calibratedThreshold: number | null;
 	onTapSequence: (count: TapCount) => void;
@@ -22,7 +21,6 @@ export function useTapDetector(
 ): UseTapDetectorReturn {
 	const {
 		enabled,
-		sensitivity,
 		baseline,
 		calibratedThreshold,
 		onTapSequence,
@@ -40,7 +38,11 @@ export function useTapDetector(
 	onTapSequenceRef.current = onTapSequence;
 	onTapDetectedRef.current = onTapDetected;
 
-	// Create/dispose detector
+	// Create detector + subscribe to accelerometer data in a single effect.
+	// Keeping them together eliminates timing issues between detector creation
+	// and data subscription. Sensitivity, baseline, and threshold are updated
+	// via dedicated effects to avoid destroying in-progress tap detection state.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional — setter effects handle sensitivity/baseline/threshold updates
 	useEffect(() => {
 		if (!enabled) {
 			detectorRef.current?.dispose();
@@ -50,7 +52,6 @@ export function useTapDetector(
 		}
 
 		const detector = new TapDetector({
-			sensitivity,
 			calibratedThreshold,
 			onTapSequence: (count) => {
 				setLastSequence(count);
@@ -69,42 +70,37 @@ export function useTapDetector(
 
 		detectorRef.current = detector;
 
-		return () => {
-			detector.dispose();
-		};
-	}, [enabled, sensitivity, baseline, calibratedThreshold]);
+		// Subscribe to accelerometer data with race-safe async cleanup
+		let cancelled = false;
+		let unlistenFn: (() => void) | null = null;
 
-	// Subscribe to accelerometer data
-	useEffect(() => {
-		if (!enabled || !detectorRef.current) return;
-
-		let unlisten: (() => void) | undefined;
-		let mounted = true;
-
-		const subscribe = async () => {
-			unlisten = await onAccelerometerData((data) => {
-				if (!mounted) return;
-				detectorRef.current?.processSample({
-					x: data.x,
-					y: data.y,
-					z: data.z,
-					timestamp: data.timestamp,
-				});
+		onAccelerometerData((data) => {
+			if (cancelled) return;
+			detector.processSample({
+				x: data.x,
+				y: data.y,
+				z: data.z,
+				timestamp: data.timestamp,
 			});
-		};
-
-		subscribe().catch(() => {});
+		}).then((fn) => {
+			if (cancelled) {
+				fn();
+			} else {
+				unlistenFn = fn;
+			}
+		});
 
 		return () => {
-			mounted = false;
-			unlisten?.();
+			cancelled = true;
+			unlistenFn?.();
+			detector.dispose();
 		};
 	}, [enabled]);
 
-	// Update sensitivity without recreating detector
+	// Update calibrated threshold without recreating detector
 	useEffect(() => {
-		detectorRef.current?.setSensitivity(sensitivity);
-	}, [sensitivity]);
+		detectorRef.current?.setCalibratedThreshold(calibratedThreshold);
+	}, [calibratedThreshold]);
 
 	// Update baseline without recreating detector
 	const prevBaseline = useRef(baseline);

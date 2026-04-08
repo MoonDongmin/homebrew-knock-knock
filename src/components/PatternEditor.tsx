@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocale } from "../hooks/useLocale";
 import type { Action, TapCount, TapPattern } from "../lib/types";
 import { ActionPicker } from "./ActionPicker";
 import { TapDots } from "./TapDots";
@@ -26,6 +27,7 @@ export function PatternEditor({
 	);
 	const [enabled, setEnabled] = useState(pattern?.enabled ?? true);
 	const [showActionPicker, setShowActionPicker] = useState(false);
+	const { t } = useLocale();
 
 	const isEditing = pattern !== undefined;
 
@@ -36,22 +38,20 @@ export function PatternEditor({
 
 	return (
 		<>
-			<div className="space-y-6">
+			<div className="space-y-8">
 				<div>
-					<h3 className="text-lg font-semibold text-white mb-1">
-						{isEditing ? "Edit Pattern" : "New Pattern"}
+					<h3 className="text-lg font-semibold text-white mb-2">
+						{isEditing ? t("pattern.editPattern") : t("pattern.newPattern")}
 					</h3>
 					<p className="text-sm text-gray-400">
-						{isEditing
-							? "Modify this tap pattern mapping."
-							: "Create a new tap pattern and assign an action."}
+						{isEditing ? t("pattern.editDesc") : t("pattern.newDesc")}
 					</p>
 				</div>
 
-				{/* Tap count selector */}
+				{/* Knock count selector */}
 				<div className="space-y-2">
 					<span className="block text-sm font-medium text-gray-300">
-						Tap Count
+						{t("pattern.knockCount")}
 					</span>
 					<div className="flex gap-2">
 						{VALID_TAP_COUNTS.map((count) => {
@@ -83,7 +83,7 @@ export function PatternEditor({
 				{/* Action selector */}
 				<div className="space-y-2">
 					<span className="block text-sm font-medium text-gray-300">
-						Action
+						{t("pattern.action")}
 					</span>
 					<button
 						type="button"
@@ -93,14 +93,16 @@ export function PatternEditor({
 						{selectedAction ? (
 							<span className="text-white">{selectedAction.label}</span>
 						) : (
-							<span className="text-gray-500">Choose an action...</span>
+							<span className="text-gray-500">{t("pattern.chooseAction")}</span>
 						)}
 					</button>
 				</div>
 
 				{/* Enable toggle */}
 				<div className="flex items-center justify-between">
-					<span className="text-sm font-medium text-gray-300">Enabled</span>
+					<span className="text-sm font-medium text-gray-300">
+						{t("pattern.enabled")}
+					</span>
 					<button
 						type="button"
 						onClick={() => setEnabled(!enabled)}
@@ -125,7 +127,7 @@ export function PatternEditor({
 						onClick={onCancel}
 						className="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition-colors"
 					>
-						Cancel
+						{t("pattern.cancel")}
 					</button>
 					<button
 						type="button"
@@ -133,7 +135,7 @@ export function PatternEditor({
 						disabled={!selectedAction}
 						className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					>
-						{isEditing ? "Save" : "Add Pattern"}
+						{isEditing ? t("pattern.save") : t("pattern.add")}
 					</button>
 				</div>
 			</div>

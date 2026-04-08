@@ -9,13 +9,18 @@ interface SoundSettingsProps {
 	onFeedbackSoundChange: (sound: AppSettings["feedbackSound"]) => void;
 }
 
-const SOUND_OPTIONS: { value: AppSettings["feedbackSound"]; label: string }[] =
-	[
-		{ value: "Tink", label: "Tink" },
-		{ value: "Pop", label: "Pop" },
-		{ value: "Blow", label: "Blow" },
-		{ value: "Glass", label: "Glass" },
-	];
+const SOUND_OPTIONS: {
+	value: AppSettings["feedbackSound"];
+	labelKey: "system" | "custom";
+	label: string;
+}[] = [
+	{ value: "Tink", labelKey: "system", label: "Tink" },
+	{ value: "Pop", labelKey: "system", label: "Pop" },
+	{ value: "Blow", labelKey: "system", label: "Blow" },
+	{ value: "Glass", labelKey: "system", label: "Glass" },
+	{ value: "angerychan9", labelKey: "custom", label: "아오!" },
+	{ value: "chan9", labelKey: "custom", label: "야!" },
+];
 
 export function SoundSettings({
 	soundFeedback,
@@ -30,12 +35,14 @@ export function SoundSettings({
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-8">
 			<div>
-				<h3 className="text-lg font-semibold text-white mb-1">
+				<h3 className="text-lg font-semibold text-white mb-2">
 					{t("sound.title")}
 				</h3>
-				<p className="text-sm text-gray-400">{t("sound.desc")}</p>
+				<p className="text-sm text-gray-400 leading-relaxed">
+					{t("sound.desc")}
+				</p>
 			</div>
 
 			{/* Enable/disable */}

@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
   <img src="https://img.shields.io/badge/Apple%20Silicon-only-blue" alt="Apple Silicon">
-  <img src="https://img.shields.io/badge/version-0.1.1-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version">
 </p>
 
 ---

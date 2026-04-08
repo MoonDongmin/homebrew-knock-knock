@@ -18,7 +18,8 @@ interface ActionPickerProps {
 }
 
 const CATEGORY_ICONS: Record<string, string> = {
-	Media: "M9 19V6l12-3v13",
+	Media:
+		"M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z",
 	Volume:
 		"M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z",
 	System:
@@ -27,6 +28,8 @@ const CATEGORY_ICONS: Record<string, string> = {
 		"M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25",
 	"Keyboard Shortcut":
 		"M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z",
+	Voice:
+		"M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z",
 };
 
 export function ActionPicker({
@@ -40,6 +43,7 @@ export function ActionPicker({
 	const categoryLabels: Record<string, string> = useMemo(
 		() => ({
 			Media: t("action.categoryMedia"),
+			Voice: t("action.categoryVoice"),
 			"App Launch": t("action.categoryAppLaunch"),
 		}),
 		[t],

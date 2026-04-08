@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useState } from "react";
 import {
-	type AccelerometerData,
 	calibrate,
 	isAvailable,
-	onAccelerometerData,
 	startStream,
 	stopStream,
 } from "../../src-tauri/plugins/tauri-plugin-accelerometer/guest-js/index";
-import type { AccelerometerSample, CalibrationBaseline } from "../lib/types";
+import type { CalibrationBaseline } from "../lib/types";
 
 interface UseAccelerometerReturn {
 	isAvailable: boolean;
 	isStreaming: boolean;
-	lastSample: AccelerometerSample | null;
 	start: () => Promise<void>;
 	stop: () => Promise<void>;
 	calibrate: () => Promise<CalibrationBaseline>;
@@ -22,11 +20,7 @@ interface UseAccelerometerReturn {
 export function useAccelerometer(): UseAccelerometerReturn {
 	const [available, setAvailable] = useState(false);
 	const [streaming, setStreaming] = useState(false);
-	const [lastSample, setLastSample] = useState<AccelerometerSample | null>(
-		null,
-	);
 	const [error, setError] = useState<string | null>(null);
-	const unlistenRef = useRef<(() => void) | null>(null);
 
 	useEffect(() => {
 		let mounted = true;
@@ -46,20 +40,9 @@ export function useAccelerometer(): UseAccelerometerReturn {
 		};
 	}, []);
 
-	const handleData = useCallback((data: AccelerometerData) => {
-		setLastSample({
-			x: data.x,
-			y: data.y,
-			z: data.z,
-			timestamp: data.timestamp,
-		});
-	}, []);
-
 	const start = useCallback(async () => {
 		try {
 			setError(null);
-			const unlisten = await onAccelerometerData(handleData);
-			unlistenRef.current = unlisten;
 			await startStream();
 			setStreaming(true);
 		} catch (e: unknown) {
@@ -67,12 +50,10 @@ export function useAccelerometer(): UseAccelerometerReturn {
 			setError(msg);
 			setStreaming(false);
 		}
-	}, [handleData]);
+	}, []);
 
 	const stop = useCallback(async () => {
 		try {
-			unlistenRef.current?.();
-			unlistenRef.current = null;
 			await stopStream();
 			setStreaming(false);
 		} catch (e: unknown) {
@@ -85,10 +66,25 @@ export function useAccelerometer(): UseAccelerometerReturn {
 		return { x: result.x, y: result.y, z: result.z };
 	}, []);
 
+	// Listen for helper connection errors (e.g., password canceled, helper timeout)
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+
+		listen<string>("accelerometer://error", (event) => {
+			setError(event.payload);
+			setStreaming(false);
+		}).then((fn) => {
+			unlisten = fn;
+		});
+
+		return () => {
+			unlisten?.();
+		};
+	}, []);
+
 	// Cleanup on unmount
 	useEffect(() => {
 		return () => {
-			unlistenRef.current?.();
 			stopStream().catch(() => {});
 		};
 	}, []);
@@ -96,7 +92,6 @@ export function useAccelerometer(): UseAccelerometerReturn {
 	return {
 		isAvailable: available,
 		isStreaming: streaming,
-		lastSample,
 		start,
 		stop,
 		calibrate: doCalibrate,

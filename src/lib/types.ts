@@ -18,7 +18,8 @@ export type ActionType =
 	| "volume"
 	| "app_launch"
 	| "system"
-	| "keyboard_shortcut";
+	| "keyboard_shortcut"
+	| "sound_play";
 
 export interface MediaPayload {
 	key: "play_pause" | "next_track" | "previous_track";
@@ -43,12 +44,17 @@ export interface KeyboardShortcutPayload {
 	modifiers: ("cmd" | "ctrl" | "alt" | "shift")[];
 }
 
+export interface SoundPlayPayload {
+	soundName: string;
+}
+
 export type ActionPayload =
 	| MediaPayload
 	| VolumePayload
 	| AppLaunchPayload
 	| SystemPayload
-	| KeyboardShortcutPayload;
+	| KeyboardShortcutPayload
+	| SoundPlayPayload;
 
 export interface Action {
 	type: ActionType;
@@ -66,9 +72,8 @@ export interface TapPattern {
 
 export interface AppSettings {
 	patterns: TapPattern[];
-	sensitivity: number;
 	soundFeedback: boolean;
-	feedbackSound: "Tink" | "Pop" | "Blow" | "Glass";
+	feedbackSound: "Tink" | "Pop" | "Blow" | "Glass" | "angerychan9" | "chan9";
 	monitoringEnabled: boolean;
 	launchAtLogin: boolean;
 	calibrationBaseline: CalibrationBaseline | null;

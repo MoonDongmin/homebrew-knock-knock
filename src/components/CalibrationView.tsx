@@ -20,10 +20,16 @@ type CalibrationPhase =
 interface KnockTestState {
 	/** Which knock count we're currently verifying (1, 2, or 3) */
 	targetCount: number;
-	/** "waiting" | "listening" | "confirm" | "wrong" */
-	status: "waiting" | "listening" | "confirm" | "wrong";
-	/** Detected count from TapDetector */
-	detectedCount: number | null;
+	/** "waiting" = not started, "listening" = actively listening + adjusting */
+	status: "waiting" | "listening";
+	/** Last detected count (null if none yet) */
+	lastDetectedCount: number | null;
+	/** Whether last detection matched the target */
+	lastDetectedCorrect: boolean;
+	/** Whether at least one correct detection happened (enables confirm button) */
+	hasConfirmed: boolean;
+	/** Live tap count while listening (before sequence finalizes) */
+	liveTapCount: number;
 }
 
 interface CalibrationResult {
@@ -54,12 +60,23 @@ export function CalibrationView({
 	const [knockTest, setKnockTest] = useState<KnockTestState>({
 		targetCount: TAP_CALIBRATION.verifySteps[0],
 		status: "waiting",
-		detectedCount: null,
+		lastDetectedCount: null,
+		lastDetectedCorrect: false,
+		hasConfirmed: false,
+		liveTapCount: 0,
 	});
 	const [completedSteps, setCompletedSteps] = useState<number[]>([]);
 
 	const unlistenRef = useRef<(() => void) | null>(null);
 	const detectorRef = useRef<TapDetector | null>(null);
+	const baselineRef = useRef<CalibrationBaseline | null>(null);
+	const thresholdRef = useRef(threshold);
+	const targetCountRef = useRef(knockTest.targetCount);
+
+	// Keep refs in sync
+	baselineRef.current = baseline;
+	thresholdRef.current = threshold;
+	targetCountRef.current = knockTest.targetCount;
 
 	// Cleanup on unmount
 	useEffect(() => {
@@ -96,29 +113,40 @@ export function CalibrationView({
 	}, []);
 
 	const startListening = useCallback(async () => {
-		if (!baseline) return;
+		const bl = baselineRef.current;
+		if (!bl) return;
 
 		setKnockTest((prev) => ({
 			...prev,
 			status: "listening",
-			detectedCount: null,
+			lastDetectedCount: null,
+			lastDetectedCorrect: false,
+			liveTapCount: 0,
 		}));
 
-		const targetCount = knockTest.targetCount;
+		const targetCount = targetCountRef.current;
 
-		// Create TapDetector with current threshold
+		// Create TapDetector with current threshold (from ref for freshness)
 		const detector = new TapDetector({
-			calibratedThreshold: threshold,
-			sensitivity: 1.0,
+			calibratedThreshold: thresholdRef.current,
 			onTapSequence: (count: TapCount) => {
+				const isCorrect = count === targetCount;
 				setKnockTest((prev) => ({
 					...prev,
-					status: count === targetCount ? "confirm" : "wrong",
-					detectedCount: count,
+					lastDetectedCount: count,
+					lastDetectedCorrect: isCorrect,
+					hasConfirmed: prev.hasConfirmed || isCorrect,
+					liveTapCount: 0,
+				}));
+			},
+			onTapDetected: () => {
+				setKnockTest((prev) => ({
+					...prev,
+					liveTapCount: prev.liveTapCount + 1,
 				}));
 			},
 		});
-		detector.setBaseline(baseline);
+		detector.setBaseline(bl);
 		detectorRef.current = detector;
 
 		try {
@@ -137,18 +165,13 @@ export function CalibrationView({
 			await stopListening();
 			setError(e instanceof Error ? e.message : String(e));
 		}
-	}, [baseline, threshold, knockTest.targetCount, stopListening]);
-
-	// Stop stream when result is shown (confirm or wrong)
-	useEffect(() => {
-		if (knockTest.status === "confirm" || knockTest.status === "wrong") {
-			stopListening();
-		}
-	}, [knockTest.status, stopListening]);
+	}, [stopListening]);
 
 	// ─── User actions ───────────────────────────────────
 
-	const handleConfirm = useCallback(() => {
+	const handleConfirm = useCallback(async () => {
+		await stopListening();
+
 		const next = [...completedSteps, knockTest.targetCount];
 		setCompletedSteps(next);
 
@@ -161,48 +184,43 @@ export function CalibrationView({
 			// All steps verified — done
 			setPhase("complete");
 		} else {
-			// Move to next knock count
+			// Move to next knock count and auto-start listening
 			const nextTarget = TAP_CALIBRATION.verifySteps[nextStepIndex] as number;
+			targetCountRef.current = nextTarget;
 			setKnockTest({
 				targetCount: nextTarget,
-				status: "waiting",
-				detectedCount: null,
+				status: "listening",
+				lastDetectedCount: null,
+				lastDetectedCorrect: false,
+				hasConfirmed: false,
+				liveTapCount: 0,
 			});
+			startListening();
 		}
-	}, [completedSteps, knockTest.targetCount]);
-
-	const handleRetry = useCallback(() => {
-		setKnockTest((prev) => ({
-			...prev,
-			status: "waiting",
-			detectedCount: null,
-		}));
-	}, []);
+	}, [completedSteps, knockTest.targetCount, stopListening, startListening]);
 
 	const handleCancelListening = useCallback(async () => {
 		await stopListening();
 		setKnockTest((prev) => ({
 			...prev,
 			status: "waiting",
-			detectedCount: null,
+			lastDetectedCount: null,
+			lastDetectedCorrect: false,
+			hasConfirmed: false,
+			liveTapCount: 0,
 		}));
 	}, [stopListening]);
 
-	const handleAdjustAndRetry = useCallback(
-		(direction: "more_sensitive" | "less_sensitive") => {
-			setThreshold((prev) => {
-				const factor =
-					direction === "more_sensitive"
-						? 1 - TAP_CALIBRATION.thresholdAdjustStep
-						: 1 + TAP_CALIBRATION.thresholdAdjustStep;
-				return Math.max(
-					TAP_CALIBRATION.thresholdMin,
-					Math.min(TAP_CALIBRATION.thresholdMax, prev * factor),
-				);
-			});
-			handleRetry();
+	// Handle threshold slider change — restart listening if active
+	const handleSliderChange = useCallback(
+		(newThreshold: number) => {
+			setThreshold(newThreshold);
+			thresholdRef.current = newThreshold;
+			if (knockTest.status === "listening") {
+				stopListening().then(() => startListening());
+			}
 		},
-		[handleRetry],
+		[knockTest.status, stopListening, startListening],
 	);
 
 	const finish = useCallback(() => {
@@ -220,6 +238,13 @@ export function CalibrationView({
 			: phase === "complete"
 				? totalSteps
 				: completedSteps.length + 1;
+
+	// Threshold → sensitivity percentage (log scale)
+	const logMin = Math.log10(TAP_CALIBRATION.thresholdMin);
+	const logMax = Math.log10(TAP_CALIBRATION.thresholdMax);
+	const sensitivityPercent = Math.round(
+		((logMax - Math.log10(threshold)) / (logMax - logMin)) * 100,
+	);
 
 	return (
 		<div className="min-h-screen bg-gray-950 flex items-center justify-center p-8">
@@ -334,42 +359,26 @@ export function CalibrationView({
 								</div>
 								{error && <ErrorBanner message={error} />}
 
-								{/* Sensitivity slider */}
-								<div className="bg-gray-900 rounded-xl p-4 space-y-3">
-									<div className="flex justify-between text-sm">
-										<span className="text-gray-400">
-											{t("cal.sensitivity")}
-										</span>
-										<span className="text-gray-300 font-mono text-xs">
-											{threshold.toFixed(4)}g
-										</span>
-									</div>
-									<input
-										type="range"
-										min={Math.log10(TAP_CALIBRATION.thresholdMin)}
-										max={Math.log10(TAP_CALIBRATION.thresholdMax)}
-										step={0.01}
-										value={Math.log10(threshold)}
-										onChange={(e) => setThreshold(10 ** Number(e.target.value))}
-										className="w-full accent-amber-500"
-									/>
-									<div className="flex justify-between text-xs text-gray-600">
-										<span>{t("cal.moreSensitive")}</span>
-										<span>{t("cal.lessSensitive")}</span>
-									</div>
-								</div>
-
 								<button
 									type="button"
 									onClick={startListening}
 									className="w-full py-3 px-6 rounded-xl bg-amber-600 text-white font-semibold hover:bg-amber-500 transition-colors"
 								>
-									{t("cal.ready")}
+									{t("cal.startSensitivity")}
 								</button>
+								{onCancel && (
+									<button
+										type="button"
+										onClick={onCancel}
+										className="w-full py-2.5 px-6 rounded-xl border border-gray-700 text-gray-400 hover:text-gray-300 hover:bg-gray-900 transition-colors text-sm"
+									>
+										{t("cal.backToHome")}
+									</button>
+								)}
 							</>
 						)}
 
-						{/* Listening — waiting for taps */}
+						{/* Listening — continuous test & adjust */}
 						{knockTest.status === "listening" && (
 							<>
 								<div className="space-y-4">
@@ -387,8 +396,103 @@ export function CalibrationView({
 													: t("cal.knockTest.timesUnit"),
 										})}
 									</h1>
-									<p className="text-gray-400">{t("cal.waitingForKnocks")}</p>
+
+									{/* Live tap indicator dots */}
+									<div className="flex items-center justify-center gap-3 py-2">
+										{Array.from(
+											{ length: knockTest.targetCount },
+											(_, i) => `cal-dot-${i}`,
+										).map((dotKey, i) => (
+											<div
+												key={dotKey}
+												className={`w-4 h-4 rounded-full transition-all duration-200 ${
+													i < knockTest.liveTapCount
+														? "bg-amber-400 scale-125"
+														: "bg-gray-700 border border-gray-600"
+												}`}
+											/>
+										))}
+									</div>
+
+									{/* Status — waiting, live count, or last result */}
+									{knockTest.lastDetectedCount !== null ? (
+										<div
+											className={`text-sm font-medium rounded-lg px-3 py-2 ${
+												knockTest.lastDetectedCorrect
+													? "bg-green-500/10 text-green-400"
+													: "bg-red-500/10 text-red-400"
+											}`}
+										>
+											{knockTest.lastDetectedCorrect
+												? t("cal.lastResult", {
+														n: knockTest.lastDetectedCount,
+													})
+												: knockTest.lastDetectedCount === 0
+													? t("cal.noKnockDetected")
+													: t("cal.lastResultWrong", {
+															detected: knockTest.lastDetectedCount,
+															expected: knockTest.targetCount,
+														})}
+										</div>
+									) : (
+										<p className="text-gray-400">
+											{knockTest.liveTapCount > 0
+												? t("cal.liveCount", {
+														current: knockTest.liveTapCount,
+														target: knockTest.targetCount,
+													})
+												: t("cal.waitingForKnocks")}
+										</p>
+									)}
+
+									{knockTest.hasConfirmed && (
+										<p className="text-xs text-gray-500">
+											{t("cal.confirmWhenReady")}
+										</p>
+									)}
 								</div>
+
+								{/* Sensitivity slider — always visible during listening */}
+								<div className="bg-gray-900 rounded-xl p-4 space-y-3">
+									<div className="flex justify-between text-sm">
+										<span className="text-gray-400">
+											{t("cal.sensitivity")}
+										</span>
+										<span className="text-gray-300 font-mono text-xs">
+											{sensitivityPercent}%
+										</span>
+									</div>
+									<input
+										type="range"
+										min={-Math.log10(TAP_CALIBRATION.thresholdMax)}
+										max={-Math.log10(TAP_CALIBRATION.thresholdMin)}
+										step={0.01}
+										value={-Math.log10(threshold)}
+										onChange={(e) =>
+											handleSliderChange(10 ** -Number(e.target.value))
+										}
+										className="w-full accent-amber-500"
+									/>
+									<div className="flex justify-between text-xs text-gray-600">
+										<span>{t("cal.lessSensitive")}</span>
+										<span>{t("cal.moreSensitive")}</span>
+									</div>
+								</div>
+
+								{/* Confirm button — enabled only after correct detection */}
+								<button
+									type="button"
+									onClick={handleConfirm}
+									disabled={!knockTest.hasConfirmed}
+									className={`w-full py-3 px-6 rounded-xl font-semibold transition-colors ${
+										knockTest.hasConfirmed
+											? "bg-green-600 text-white hover:bg-green-500"
+											: "bg-gray-800 text-gray-600 cursor-not-allowed"
+									}`}
+								>
+									{t("cal.confirmSensitivity")}
+								</button>
+
 								<button
 									type="button"
 									onClick={handleCancelListening}
@@ -396,86 +500,6 @@ export function CalibrationView({
 								>
 									{t("cal.cancel")}
 								</button>
-							</>
-						)}
-
-						{/* Confirm — detected correctly */}
-						{knockTest.status === "confirm" && (
-							<>
-								<div className="space-y-2">
-									<StepIcon color="green">
-										<CheckIcon />
-									</StepIcon>
-									<h1 className="text-2xl font-bold text-white">
-										{t("cal.detected", { n: knockTest.detectedCount ?? 0 })}
-									</h1>
-									<p className="text-gray-400">{t("cal.doesMatch")}</p>
-								</div>
-								<div className="flex gap-3">
-									<button
-										type="button"
-										onClick={handleRetry}
-										className="flex-1 py-3 px-4 rounded-xl bg-gray-800 text-gray-300 font-semibold hover:bg-gray-700 transition-colors"
-									>
-										{t("cal.noRetry")}
-									</button>
-									<button
-										type="button"
-										onClick={handleConfirm}
-										className="flex-1 py-3 px-4 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-500 transition-colors"
-									>
-										{t("cal.yesCorrect")}
-									</button>
-								</div>
-							</>
-						)}
-
-						{/* Wrong — detected wrong count */}
-						{knockTest.status === "wrong" && (
-							<>
-								<div className="space-y-2">
-									<StepIcon color="red">
-										<XIcon />
-									</StepIcon>
-									<h1 className="text-2xl font-bold text-white">
-										{knockTest.detectedCount === 0
-											? t("cal.noKnockDetected")
-											: t("cal.detectedWrong", {
-													detected: knockTest.detectedCount ?? 0,
-													expected: knockTest.targetCount,
-												})}
-									</h1>
-									<p className="text-gray-400">
-										{knockTest.detectedCount === 0
-											? t("cal.tryHarder")
-											: t("cal.needsAdjust")}
-									</p>
-								</div>
-								<div className="space-y-2">
-									<button
-										type="button"
-										onClick={handleRetry}
-										className="w-full py-3 px-6 rounded-xl bg-gray-800 text-gray-300 font-semibold hover:bg-gray-700 transition-colors"
-									>
-										{t("cal.retrySame")}
-									</button>
-									<div className="flex gap-3">
-										<button
-											type="button"
-											onClick={() => handleAdjustAndRetry("more_sensitive")}
-											className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600/20 text-blue-400 text-sm font-medium hover:bg-blue-600/30 transition-colors"
-										>
-											{t("cal.moreSensitive")}
-										</button>
-										<button
-											type="button"
-											onClick={() => handleAdjustAndRetry("less_sensitive")}
-											className="flex-1 py-2.5 px-4 rounded-xl bg-orange-600/20 text-orange-400 text-sm font-medium hover:bg-orange-600/30 transition-colors"
-										>
-											{t("cal.lessSensitive")}
-										</button>
-									</div>
-								</div>
 							</>
 						)}
 					</>
@@ -497,7 +521,7 @@ export function CalibrationView({
 							<div className="flex justify-between">
 								<span className="text-gray-500">{t("cal.tapThreshold")}</span>
 								<span className="text-gray-300 font-mono">
-									{threshold.toFixed(4)}g
+									{sensitivityPercent}%
 								</span>
 							</div>
 							<div className="flex justify-between">
@@ -566,24 +590,6 @@ function CheckIcon() {
 			aria-hidden="true"
 		>
 			<path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-		</svg>
-	);
-}
-
-function XIcon() {
-	return (
-		<svg
-			fill="none"
-			viewBox="0 0 24 24"
-			stroke="currentColor"
-			strokeWidth={2}
-			aria-hidden="true"
-		>
-			<path
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				d="M6 18L18 6M6 6l12 12"
-			/>
 		</svg>
 	);
 }

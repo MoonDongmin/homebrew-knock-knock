@@ -34,16 +34,8 @@ export const TRIAL = {
 	offlineGraceDays: 30,
 } as const;
 
-export const SENSITIVITY_RANGE = {
-	min: 0.5,
-	max: 2.0,
-	step: 0.1,
-	default: 1.0,
-} as const;
-
 export const DEFAULT_SETTINGS: AppSettings = {
 	patterns: [],
-	sensitivity: SENSITIVITY_RANGE.default,
 	soundFeedback: true,
 	feedbackSound: "Tink",
 	monitoringEnabled: true,

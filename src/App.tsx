@@ -37,6 +37,7 @@ function App() {
 
 	const [showPurchase, setShowPurchase] = useState(false);
 	const [showCalibration, setShowCalibration] = useState(false);
+	const [pendingSection, setPendingSection] = useState<string | null>(null);
 
 	// Action mapper — synced with settings
 	const actionMapper = useMemo(() => {
@@ -80,9 +81,8 @@ function App() {
 	}, [monitoringEnabled, isStreaming]);
 
 	// Tap detector
-	const { liveTapCount } = useTapDetector({
+	const { liveTapCount, lastSequence } = useTapDetector({
 		enabled: monitoringEnabled && isStreaming,
-		sensitivity: settings?.sensitivity ?? 1.0,
 		baseline: settings?.calibrationBaseline ?? null,
 		calibratedThreshold: settings?.calibratedThreshold ?? null,
 		onTapSequence: handleTapSequence,
@@ -154,6 +154,7 @@ function App() {
 				hasCompletedCalibration: true,
 			});
 			setShowCalibration(false);
+			setPendingSection("sensitivity");
 		},
 		[updateSettings],
 	);
@@ -228,8 +229,11 @@ function App() {
 					isLicensed={isLicensed}
 					isMonitoring={monitoringEnabled && isStreaming}
 					liveTapCount={liveTapCount}
+					lastSequence={lastSequence}
 					onRecalibrate={() => setShowCalibration(true)}
 					accelError={accelError}
+					pendingSection={pendingSection}
+					onPendingSectionHandled={() => setPendingSection(null)}
 				/>
 			</div>
 		</LocaleContext.Provider>

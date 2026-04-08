@@ -24,6 +24,14 @@ const translations = {
 	"cal.moreSensitive": { en: "More sensitive", ko: "더 민감하게" },
 	"cal.lessSensitive": { en: "Less sensitive", ko: "덜 민감하게" },
 	"cal.ready": { en: "Ready — Start Listening", ko: "준비 완료 — 듣기 시작" },
+	"cal.startSensitivity": {
+		en: "Ready — Start Sensitivity Setup",
+		ko: "준비 완료 — 감도 설정 시작",
+	},
+	"cal.autoAdvancing": {
+		en: "Moving to next...",
+		ko: "다음 단계로 이동 중...",
+	},
 	"cal.knockNow": {
 		en: "Knock {n} {unit} now!",
 		ko: "지금 {n}번 노크하세요!",
@@ -72,6 +80,26 @@ const translations = {
 	"cal.knock": { en: "{n}-knock", ko: "{n}번 노크" },
 	"cal.getStarted": { en: "Get Started", ko: "시작하기" },
 	"cal.tapIntensity": { en: "Tap Intensity", ko: "탭 강도" },
+	"cal.liveCount": {
+		en: "{current} / {target} detected",
+		ko: "{current} / {target} 감지됨",
+	},
+	"cal.lastResult": {
+		en: "Last: {n}-knock detected",
+		ko: "마지막: {n}번 노크 감지",
+	},
+	"cal.lastResultWrong": {
+		en: "Last: detected {detected} instead of {expected} — adjust sensitivity",
+		ko: "마지막: {expected}번이 아닌 {detected}번 감지 — 감도를 조절해보세요",
+	},
+	"cal.confirmWhenReady": {
+		en: "When sensitivity feels right, press confirm",
+		ko: "감도가 마음에 들면 확인을 눌러주세요",
+	},
+	"cal.confirmSensitivity": {
+		en: "Yes, correct!",
+		ko: "네, 맞아요!",
+	},
 
 	// ── Settings Panel ──
 	"settings.patterns": { en: "Patterns", ko: "패턴" },
@@ -98,6 +126,36 @@ const translations = {
 	"sensitivity.effective": { en: "Effective threshold", ko: "적용 임계값" },
 	"sensitivity.easier": { en: "Easier to trigger", ko: "쉽게 감지" },
 	"sensitivity.harder": { en: "Harder to trigger", ko: "어렵게 감지" },
+	"sensitivity.liveTest": { en: "Live Test", ko: "실시간 테스트" },
+	"sensitivity.listening": { en: "Listening", ko: "감지 중" },
+	"sensitivity.paused": { en: "Paused", ko: "일시정지" },
+	"sensitivity.detecting": {
+		en: "Detecting... {n} tap(s) so far",
+		ko: "감지 중... 현재 {n}번",
+	},
+	"sensitivity.detected": {
+		en: "{n}-knock detected!",
+		ko: "{n}번 노크 감지!",
+	},
+	"sensitivity.knockToTest": {
+		en: "Knock on your desk to test",
+		ko: "책상을 노크해서 테스트하세요",
+	},
+	"sensitivity.enableMonitoring": {
+		en: "Enable monitoring to test",
+		ko: "모니터링을 켜서 테스트하세요",
+	},
+	"sensitivity.recentTests": { en: "Recent tests", ko: "최근 테스트" },
+	"sensitivity.clear": { en: "Clear", ko: "지우기" },
+	"sensitivity.nKnocks": { en: "{n}-knock", ko: "{n}번 노크" },
+	"sensitivity.needsCalibration": {
+		en: "Please set up sensitivity first",
+		ko: "먼저 감도 설정을 해주세요",
+	},
+	"sensitivity.needsCalibrationDesc": {
+		en: "Run calibration to start detecting knocks.",
+		ko: "노크 감지를 시작하려면 감도 설정을 진행해주세요.",
+	},
 
 	// ── Sound ──
 	"sound.title": { en: "Sound Feedback", ko: "소리 피드백" },
@@ -116,15 +174,50 @@ const translations = {
 		en: "Detect desk taps and trigger system actions.",
 		ko: "책상 두드리기를 감지하여 시스템 액션을 실행합니다.",
 	},
+	"about.starHelps": {
+		en: "A GitHub star helps the project grow!",
+		ko: "GitHub Star는 프로젝트 발전에 큰 도움이 됩니다!",
+	},
 
 	// ── Pattern ──
-	"pattern.taps": { en: "{n} taps", ko: "{n}번 탭" },
+	"pattern.title": { en: "Knock Patterns", ko: "노크 패턴" },
+	"pattern.desc": {
+		en: "Map desk knock patterns to actions.",
+		ko: "책상 노크 패턴에 액션을 연결하세요.",
+	},
+	"pattern.taps": { en: "{n} knock(s)", ko: "{n}번 노크" },
 	"pattern.noAction": { en: "No action assigned", ko: "액션 미지정" },
-	"pattern.add": { en: "Add pattern", ko: "패턴 추가" },
+	"pattern.add": { en: "Add Pattern", ko: "패턴 추가" },
 	"pattern.edit": { en: "Edit", ko: "수정" },
 	"pattern.delete": { en: "Delete", ko: "삭제" },
 	"pattern.selectAction": { en: "Select action", ko: "액션 선택" },
-	"pattern.tapCount": { en: "Tap count", ko: "탭 횟수" },
+	"pattern.knockCount": { en: "Knock Count", ko: "노크 횟수" },
+	"pattern.action": { en: "Action", ko: "액션" },
+	"pattern.enabled": { en: "Enabled", ko: "활성화" },
+	"pattern.newPattern": { en: "New Pattern", ko: "새 패턴" },
+	"pattern.editPattern": { en: "Edit Pattern", ko: "패턴 수정" },
+	"pattern.newDesc": {
+		en: "Create a new knock pattern and assign an action.",
+		ko: "새 노크 패턴을 만들고 액션을 연결하세요.",
+	},
+	"pattern.editDesc": {
+		en: "Modify this knock pattern mapping.",
+		ko: "이 노크 패턴 매핑을 수정합니다.",
+	},
+	"pattern.chooseAction": {
+		en: "Choose an action...",
+		ko: "액션을 선택하세요...",
+	},
+	"pattern.cancel": { en: "Cancel", ko: "취소" },
+	"pattern.save": { en: "Save", ko: "저장" },
+	"pattern.empty": {
+		en: "No patterns configured yet.",
+		ko: "아직 설정된 패턴이 없습니다.",
+	},
+	"pattern.emptyHint": {
+		en: "Add a pattern to get started.",
+		ko: "패턴을 추가해서 시작하세요.",
+	},
 
 	// ── Action Picker ──
 	"action.chooseAction": { en: "Choose Action", ko: "액션 선택" },
@@ -141,6 +234,7 @@ const translations = {
 	},
 	"action.categoryAppLaunch": { en: "App Launch", ko: "앱 실행" },
 	"action.categoryMedia": { en: "Media", ko: "미디어" },
+	"action.categoryVoice": { en: "Voice", ko: "음성" },
 
 	// ── Trial ──
 	"trial.daysLeft": { en: "{n} days left in trial", ko: "체험판 {n}일 남음" },

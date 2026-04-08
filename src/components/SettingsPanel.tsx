@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import knockIcon from "../../image/knock_icon.png";
 import { useLocale } from "../hooks/useLocale";
 import type {
 	Action,
@@ -14,14 +15,22 @@ import { PatternList } from "./PatternList";
 import { SensitivitySlider } from "./SensitivitySlider";
 import { SoundSettings } from "./SoundSettings";
 
+interface TapTestEntry {
+	detected: number;
+	timestamp: number;
+}
+
 interface SettingsPanelProps {
 	settings: AppSettings;
 	onUpdateSettings: (partial: Partial<AppSettings>) => Promise<void>;
 	isLicensed: boolean;
 	isMonitoring: boolean;
 	liveTapCount: number;
+	lastSequence: TapCount | null;
 	onRecalibrate: () => void;
 	accelError?: string | null;
+	pendingSection?: string | null;
+	onPendingSectionHandled?: () => void;
 }
 
 interface NavItem {
@@ -53,20 +62,86 @@ const NAV_ITEMS: NavItem[] = [
 	},
 ];
 
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 320;
+const SIDEBAR_DEFAULT = 220;
+
 export function SettingsPanel({
 	settings,
 	onUpdateSettings,
 	isLicensed,
 	isMonitoring,
 	liveTapCount,
+	lastSequence,
 	onRecalibrate,
 	accelError,
+	pendingSection,
+	onPendingSectionHandled,
 }: SettingsPanelProps) {
 	const { t } = useLocale();
 	const [activeSection, setActiveSection] =
 		useState<SettingsSection>("patterns");
 	const [editingPattern, setEditingPattern] = useState<TapPattern | null>(null);
 	const [isAddingPattern, setIsAddingPattern] = useState(false);
+
+	// Sidebar resize state
+	const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+	const isResizing = useRef(false);
+
+	// Navigate to pending section after calibration
+	useEffect(() => {
+		if (pendingSection) {
+			setActiveSection(pendingSection as SettingsSection);
+			onPendingSectionHandled?.();
+		}
+	}, [pendingSection, onPendingSectionHandled]);
+
+	// Sidebar drag resize handler
+	const handleResizeStart = useCallback(
+		(e: React.MouseEvent) => {
+			e.preventDefault();
+			isResizing.current = true;
+			const startX = e.clientX;
+			const startWidth = sidebarWidth;
+
+			const onMouseMove = (ev: MouseEvent) => {
+				if (!isResizing.current) return;
+				const newWidth = startWidth + (ev.clientX - startX);
+				setSidebarWidth(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, newWidth)));
+			};
+
+			const onMouseUp = () => {
+				isResizing.current = false;
+				document.removeEventListener("mousemove", onMouseMove);
+				document.removeEventListener("mouseup", onMouseUp);
+				document.body.style.cursor = "";
+				document.body.style.userSelect = "";
+			};
+
+			document.body.style.cursor = "col-resize";
+			document.body.style.userSelect = "none";
+			document.addEventListener("mousemove", onMouseMove);
+			document.addEventListener("mouseup", onMouseUp);
+		},
+		[sidebarWidth],
+	);
+
+	// Track tap test history for sensitivity live test
+	const [tapTestHistory, setTapTestHistory] = useState<TapTestEntry[]>([]);
+	const prevLastSequence = useRef(lastSequence);
+	useEffect(() => {
+		if (
+			lastSequence !== null &&
+			lastSequence !== prevLastSequence.current &&
+			activeSection === "sensitivity"
+		) {
+			setTapTestHistory((prev) => [
+				{ detected: lastSequence, timestamp: Date.now() },
+				...prev.slice(0, 4),
+			]);
+		}
+		prevLastSequence.current = lastSequence;
+	}, [lastSequence, activeSection]);
 
 	const handlePatternToggle = useCallback(
 		(tapCount: TapCount, enabled: boolean) => {
@@ -125,38 +200,24 @@ export function SettingsPanel({
 	return (
 		<div className="flex h-screen bg-gray-950">
 			{/* Sidebar */}
-			<div className="w-56 shrink-0 bg-gray-950 border-r border-gray-800 flex flex-col">
-				{/* App title + status */}
-				<div className="p-4 border-b border-gray-800">
-					<h1 className="text-lg font-bold text-white">KnockKnock</h1>
-					<div className="flex items-center gap-2 mt-2">
-						<div
-							className={`w-2 h-2 rounded-full ${
-								accelError
-									? "bg-red-400"
-									: isMonitoring
-										? "bg-green-400 animate-pulse"
-										: "bg-gray-500"
-							}`}
+			<div
+				className="shrink-0 bg-gray-950 border-r border-gray-800 flex flex-col relative"
+				style={{ width: sidebarWidth }}
+			>
+				{/* App title */}
+				<div className="px-5 py-5 border-b border-gray-800">
+					<div className="flex items-center gap-2.5">
+						<img
+							src={knockIcon}
+							alt="KnockKnock"
+							className="w-7 h-7 rounded-md"
 						/>
-						<span className="text-xs text-gray-400">
-							{accelError ? "Error" : isMonitoring ? "Monitoring" : "Paused"}
-						</span>
-						{isMonitoring && liveTapCount > 0 && (
-							<span className="text-xs text-blue-400 font-mono">
-								({liveTapCount})
-							</span>
-						)}
+						<h1 className="text-lg font-bold text-white">KnockKnock</h1>
 					</div>
-					{accelError && (
-						<p className="text-[10px] text-red-400 mt-1 leading-tight">
-							{accelError}
-						</p>
-					)}
 				</div>
 
 				{/* Navigation */}
-				<nav className="flex-1 p-2 space-y-1">
+				<nav className="flex-1 p-3 space-y-1.5">
 					{NAV_ITEMS.map((item) => (
 						<button
 							type="button"
@@ -166,7 +227,7 @@ export function SettingsPanel({
 								setEditingPattern(null);
 								setIsAddingPattern(false);
 							}}
-							className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+							className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
 								activeSection === item.id
 									? "bg-gray-800 text-white"
 									: "text-gray-400 hover:text-gray-300 hover:bg-gray-900"
@@ -190,11 +251,18 @@ export function SettingsPanel({
 						</button>
 					))}
 				</nav>
+
+				{/* Resize handle */}
+				{/* biome-ignore lint/a11y/noStaticElementInteractions: drag-only resize handle */}
+				<div
+					onMouseDown={handleResizeStart}
+					className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500/40 transition-colors"
+				/>
 			</div>
 
 			{/* Main content */}
-			<div className="flex-1 overflow-y-auto p-8">
-				<div className="max-w-2xl">
+			<div className="flex-1 overflow-y-auto px-10 py-8">
+				<div className="max-w-2xl mx-auto">
 					{activeSection === "patterns" &&
 						!editingPattern &&
 						!isAddingPattern && (
@@ -204,6 +272,10 @@ export function SettingsPanel({
 								onEdit={setEditingPattern}
 								onDelete={handlePatternDelete}
 								onAdd={() => setIsAddingPattern(true)}
+								isMonitoring={isMonitoring}
+								liveTapCount={liveTapCount}
+								lastSequence={lastSequence}
+								accelError={accelError}
 							/>
 						)}
 
@@ -222,8 +294,15 @@ export function SettingsPanel({
 
 					{activeSection === "sensitivity" && (
 						<SensitivitySlider
-							value={settings.sensitivity}
-							onChange={(v) => onUpdateSettings({ sensitivity: v })}
+							calibratedThreshold={settings.calibratedThreshold}
+							onThresholdChange={(v) =>
+								onUpdateSettings({ calibratedThreshold: v })
+							}
+							isMonitoring={isMonitoring}
+							liveTapCount={liveTapCount}
+							tapTestHistory={tapTestHistory}
+							onClearHistory={() => setTapTestHistory([])}
+							onRecalibrate={onRecalibrate}
 						/>
 					)}
 
@@ -244,7 +323,6 @@ export function SettingsPanel({
 						<AboutSection
 							isLicensed={isLicensed}
 							locale={settings.locale}
-							onRecalibrate={onRecalibrate}
 							onLocaleChange={(locale: Locale) => onUpdateSettings({ locale })}
 						/>
 					)}

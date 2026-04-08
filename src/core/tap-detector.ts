@@ -8,7 +8,6 @@ import type {
 export interface TapDetectorOptions {
 	onTapSequence: (count: TapCount) => void;
 	onTapDetected?: () => void;
-	sensitivity?: number;
 	calibratedThreshold?: number | null;
 }
 
@@ -26,7 +25,6 @@ export interface TapDetectorOptions {
  */
 export class TapDetector {
 	#baseline: CalibrationBaseline = { x: 0, y: 0, z: 0 };
-	#sensitivity: number;
 	#calibratedThreshold: number | null;
 
 	// Envelope state
@@ -46,7 +44,6 @@ export class TapDetector {
 	constructor(options: TapDetectorOptions) {
 		this.#onTapSequence = options.onTapSequence;
 		this.#onTapDetected = options.onTapDetected;
-		this.#sensitivity = options.sensitivity ?? 1.0;
 		this.#calibratedThreshold = options.calibratedThreshold ?? null;
 	}
 
@@ -55,16 +52,11 @@ export class TapDetector {
 	}
 
 	get effectiveThreshold(): number {
-		const baseThreshold = this.#calibratedThreshold ?? TAP_DETECTION.threshold;
-		return baseThreshold / this.#sensitivity;
+		return this.#calibratedThreshold ?? TAP_DETECTION.threshold;
 	}
 
 	setCalibratedThreshold(threshold: number | null): void {
 		this.#calibratedThreshold = threshold;
-	}
-
-	setSensitivity(sensitivity: number): void {
-		this.#sensitivity = sensitivity;
 	}
 
 	setBaseline(baseline: CalibrationBaseline): void {

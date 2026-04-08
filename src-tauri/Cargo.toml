@@ -1,6 +1,6 @@
 [package]
 name = "knock-knock"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2024"
 default-run = "knock-knock"
 
@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 plist = "1.8.0"
 tauri-plugin-dialog = "2.7.0"
+objc2 = "0.6.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = [
@@ -31,7 +32,7 @@ objc2-app-kit = { version = "0.3", features = [
     "NSSound",
 ] }
 objc2-core-graphics = { version = "0.3", features = ["CGEvent", "CGEventTypes"] }
-objc2-foundation = { version = "0.3", features = ["NSString", "NSGeometry"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSGeometry", "NSURL"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

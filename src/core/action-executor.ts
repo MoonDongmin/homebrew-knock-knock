@@ -5,6 +5,7 @@ import type {
 	AppLaunchPayload,
 	KeyboardShortcutPayload,
 	MediaPayload,
+	SoundPlayPayload,
 	SystemPayload,
 	VolumePayload,
 } from "../lib/types";
@@ -42,8 +43,9 @@ export class ActionExecutor {
 	}
 
 	async execute(action: Action): Promise<void> {
-		// Play feedback sound before executing the action
-		if (this.#soundEnabled) {
+		// Play feedback sound before executing the action,
+		// but skip when the action itself is a sound (to avoid double audio)
+		if (this.#soundEnabled && action.type !== "sound_play") {
 			this.#playFeedback().catch(() => {
 				// Feedback sound failure is non-critical
 			});
@@ -66,6 +68,9 @@ export class ActionExecutor {
 				await this.#executeKeyboardShortcut(
 					action.payload as KeyboardShortcutPayload,
 				);
+				break;
+			case "sound_play":
+				await this.#executeSoundPlay(action.payload as SoundPlayPayload);
 				break;
 		}
 	}
@@ -101,6 +106,10 @@ export class ActionExecutor {
 			keys: payload.keys,
 			modifiers: payload.modifiers,
 		});
+	}
+
+	async #executeSoundPlay(payload: SoundPlayPayload): Promise<void> {
+		await invoke("play_feedback_sound", { soundName: payload.soundName });
 	}
 
 	async #playFeedback(): Promise<void> {

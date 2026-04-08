@@ -1,3 +1,4 @@
+import { useLocale } from "../hooks/useLocale";
 import type { TapCount, TapPattern } from "../lib/types";
 import { TapDots } from "./TapDots";
 
@@ -7,6 +8,10 @@ interface PatternListProps {
 	onEdit: (pattern: TapPattern) => void;
 	onDelete: (tapCount: TapCount) => void;
 	onAdd: () => void;
+	isMonitoring: boolean;
+	liveTapCount: number;
+	lastSequence: TapCount | null;
+	accelError?: string | null;
 }
 
 export function PatternList({
@@ -15,29 +20,126 @@ export function PatternList({
 	onEdit,
 	onDelete,
 	onAdd,
+	isMonitoring,
+	liveTapCount,
+	lastSequence,
+	accelError,
 }: PatternListProps) {
+	const { t } = useLocale();
+
 	return (
 		<div className="space-y-6">
+			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div>
-					<h3 className="text-lg font-semibold text-white">Tap Patterns</h3>
-					<p className="text-sm text-gray-400 mt-1">
-						Map desk tap patterns to actions.
-					</p>
+					<h3 className="text-lg font-semibold text-white">
+						{t("pattern.title")}
+					</h3>
+					<p className="text-sm text-gray-400 mt-1">{t("pattern.desc")}</p>
 				</div>
 				<button
 					type="button"
 					onClick={onAdd}
-					className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors"
+					className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors flex items-center gap-1.5"
 				>
-					Add Pattern
+					<svg
+						className="w-3.5 h-3.5"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						strokeWidth={2}
+						aria-hidden="true"
+					>
+						<path
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							d="M12 4.5v15m7.5-7.5h-15"
+						/>
+					</svg>
+					{t("pattern.add")}
 				</button>
 			</div>
 
+			{/* Monitoring status bar */}
+			<div
+				className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-colors ${
+					accelError
+						? "border-red-500/30 bg-red-500/5"
+						: isMonitoring
+							? "border-green-500/20 bg-green-500/5"
+							: "border-gray-800 bg-gray-900/30"
+				}`}
+			>
+				<div className="flex items-center gap-3">
+					<div
+						className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+							accelError
+								? "bg-red-400"
+								: isMonitoring
+									? "bg-green-400 animate-pulse"
+									: "bg-gray-500"
+						}`}
+					/>
+					<div>
+						<span
+							className={`text-sm font-medium ${
+								accelError
+									? "text-red-400"
+									: isMonitoring
+										? "text-green-400"
+										: "text-gray-500"
+							}`}
+						>
+							{accelError
+								? "Error"
+								: isMonitoring
+									? t("settings.monitoringOn")
+									: t("settings.monitoringOff")}
+						</span>
+						{accelError && (
+							<p className="text-[11px] text-red-400/70 mt-0.5 leading-tight">
+								{accelError}
+							</p>
+						)}
+					</div>
+				</div>
+				{isMonitoring && !accelError && (
+					<div className="flex items-center gap-2">
+						{liveTapCount > 0 && (
+							<span className="text-xs text-blue-400 font-mono bg-blue-400/10 px-2 py-0.5 rounded-full">
+								{t("sensitivity.detecting", { n: liveTapCount })}
+							</span>
+						)}
+						{lastSequence !== null && liveTapCount === 0 && (
+							<span className="text-xs text-emerald-400 font-mono bg-emerald-400/10 px-2 py-0.5 rounded-full">
+								{t("sensitivity.detected", { n: lastSequence })}
+							</span>
+						)}
+					</div>
+				)}
+			</div>
+
+			{/* Pattern list */}
 			{patterns.length === 0 ? (
-				<div className="text-center py-12 text-gray-500">
-					<p className="text-sm">No patterns configured yet.</p>
-					<p className="text-xs mt-1">Add a pattern to get started.</p>
+				<div className="text-center py-14 border border-dashed border-gray-800 rounded-xl">
+					<div className="text-gray-600 mb-3">
+						<svg
+							className="w-10 h-10 mx-auto"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							strokeWidth={1}
+							aria-hidden="true"
+						>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"
+							/>
+						</svg>
+					</div>
+					<p className="text-sm text-gray-500">{t("pattern.empty")}</p>
+					<p className="text-xs text-gray-600 mt-1">{t("pattern.emptyHint")}</p>
 				</div>
 			) : (
 				<div className="space-y-2">
@@ -48,6 +150,7 @@ export function PatternList({
 							onToggle={onToggle}
 							onEdit={onEdit}
 							onDelete={onDelete}
+							lastSequence={lastSequence}
 						/>
 					))}
 				</div>
@@ -61,25 +164,32 @@ function PatternRow({
 	onToggle,
 	onEdit,
 	onDelete,
+	lastSequence,
 }: {
 	pattern: TapPattern;
 	onToggle: (tapCount: TapCount, enabled: boolean) => void;
 	onEdit: (pattern: TapPattern) => void;
 	onDelete: (tapCount: TapCount) => void;
+	lastSequence: TapCount | null;
 }) {
+	const { t } = useLocale();
+	const isJustTriggered = lastSequence === pattern.tapCount && pattern.enabled;
+
 	return (
 		<div
-			className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-colors ${
-				pattern.enabled
-					? "border-gray-800 bg-gray-900/50"
-					: "border-gray-800/50 bg-gray-950/50 opacity-60"
+			className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all duration-300 ${
+				isJustTriggered
+					? "border-blue-500/50 bg-blue-500/10 ring-1 ring-blue-500/20"
+					: pattern.enabled
+						? "border-gray-800 bg-gray-900/50 hover:border-gray-700"
+						: "border-gray-800/50 bg-gray-950/50 opacity-50"
 			}`}
 		>
 			{/* Tap dots */}
 			<div className="w-20 shrink-0 text-blue-400">
 				<TapDots count={pattern.tapCount} />
 				<div className="text-xs text-gray-500 text-center mt-1">
-					{pattern.tapCount} {pattern.tapCount === 1 ? "tap" : "taps"}
+					{t("pattern.taps", { n: pattern.tapCount })}
 				</div>
 			</div>
 
