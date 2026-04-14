@@ -10,40 +10,37 @@ pub struct SoundResult {
 }
 
 struct CustomSound {
-    filename: &'static str,
+    resource: &'static str,
     rate: f32,
 }
 
-/// Custom sounds bundled as resources (name → filename + playback rate)
+/// Custom sounds bundled as resources (name → resource path + playback rate).
+/// Resource paths are relative to src-tauri/ (matches `"resources": ["voice/*"]`
+/// in tauri.conf.json) and map to Contents/Resources/voice/ inside the .app bundle.
 fn custom_sound(sound_name: &str) -> Option<CustomSound> {
     match sound_name {
-        "angerychan9" => Some(CustomSound { filename: "angerychan9.mp3", rate: 2.0 }),
-        "chan9" => Some(CustomSound { filename: "chan9.mp3", rate: 1.0 }),
+        "angerychan9" => Some(CustomSound { resource: "voice/angerychan9.mp3", rate: 2.0 }),
+        "chan9" => Some(CustomSound { resource: "voice/chan9.mp3", rate: 1.0 }),
         _ => None,
     }
 }
 
 /// Resolve a bundled resource file path.
 /// In production: uses Tauri's resource directory (inside .app bundle).
-/// In dev: falls back to the project's voice/ directory.
-fn resolve_sound_resource(app: &AppHandle, filename: &str) -> Result<PathBuf, String> {
-    if let Ok(path) = app.path().resolve(filename, BaseDirectory::Resource) {
+/// In dev: falls back to the same path relative to src-tauri/.
+fn resolve_sound_resource(app: &AppHandle, resource: &str) -> Result<PathBuf, String> {
+    if let Ok(path) = app.path().resolve(resource, BaseDirectory::Resource) {
         if path.exists() {
             return Ok(path);
         }
     }
 
-    // Dev fallback: voice/ directory relative to src-tauri/
-    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|p| p.join("voice").join(filename))
-        .ok_or_else(|| "Failed to resolve dev resource path".to_string())?;
-
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(resource);
     if dev_path.exists() {
         return Ok(dev_path);
     }
 
-    Err(format!("Sound file not found: {filename}"))
+    Err(format!("Sound file not found: {resource}"))
 }
 
 #[tauri::command]
@@ -52,7 +49,7 @@ pub fn play_feedback_sound(
     sound_name: String,
 ) -> Result<SoundResult, String> {
     if let Some(sound) = custom_sound(&sound_name) {
-        let resource_path = resolve_sound_resource(&app, sound.filename)?;
+        let resource_path = resolve_sound_resource(&app, sound.resource)?;
         let rate = sound.rate;
 
         std::thread::spawn(move || {

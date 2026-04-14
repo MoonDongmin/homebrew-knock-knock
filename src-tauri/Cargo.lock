@@ -1701,7 +1701,7 @@ dependencies = [
 
 [[package]]
 name = "knock-knock"
-version = "0.1.1"
+version = "1.1.0"
 dependencies = [
  "objc2",
  "objc2-app-kit",
@@ -3633,7 +3633,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-accelerometer"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",

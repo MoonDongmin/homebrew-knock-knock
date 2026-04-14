@@ -20,12 +20,12 @@ export function AboutSection({
 				<h3 className="text-lg font-semibold text-white mb-2">
 					{t("settings.about")}
 				</h3>
-				<p className="text-sm text-gray-400">KnockKnock v0.1.0</p>
+				<p className="text-sm text-gray-400">KnockKnock v1.1.0</p>
 			</div>
 
 			{/* App info */}
 			<div className="bg-gray-900 rounded-lg p-5 space-y-4">
-				<InfoRow label={t("about.version")} value="0.1.0" />
+				<InfoRow label={t("about.version")} value="1.1.0" />
 				<InfoRow label="License" value={isLicensed ? "Licensed" : "Trial"} />
 				<InfoRow label="Platform" value="macOS (Apple Silicon)" />
 			</div>

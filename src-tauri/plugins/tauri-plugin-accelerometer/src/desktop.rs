@@ -1,14 +1,20 @@
 use crate::iokit_hid::AccelSample;
 use serde::Serialize;
 use std::io::Read;
-use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
+
+/// LaunchDaemon identity — must match the Label in the plist.
+const DAEMON_LABEL: &str = "com.knockknock.helper";
+const DAEMON_PLIST_PATH: &str = "/Library/LaunchDaemons/com.knockknock.helper.plist";
+/// Well-known socket the daemon binds to; the app connects to it on every start.
+const DAEMON_SOCKET_PATH: &str = "/var/run/com.knockknock.helper.sock";
 
 /// Event payload emitted to the frontend at ~100Hz.
 #[derive(Debug, Clone, Serialize)]
@@ -30,8 +36,10 @@ pub struct CalibrationResult {
 
 /// Thread-safe state for the accelerometer stream.
 ///
-/// The privileged helper is launched once per session and kept alive.
-/// `start` / `stop` toggle event emission without restarting the helper.
+/// Production builds (installed in `/Applications/`) connect to a persistent
+/// LaunchDaemon — first launch prompts for the admin password once, installs
+/// the plist, and every subsequent launch skips the prompt. Dev builds fall
+/// back to launching the helper per-session via `osascript`.
 pub struct AccelerometerState {
     inner: Mutex<Option<HelperState>>,
 }
@@ -47,10 +55,11 @@ struct HelperState {
     calibration_samples: Arc<Mutex<Vec<AccelSample>>>,
     /// Reader thread — reads from Unix socket, emits events / collects samples.
     reader_thread: Option<JoinHandle<()>>,
-    /// osascript thread — blocks until the helper process exits.
+    /// osascript thread (legacy mode only) — blocks until the helper process exits.
     osascript_thread: Option<JoinHandle<Result<(), String>>>,
-    /// Socket path for cleanup.
-    socket_path: PathBuf,
+    /// Legacy per-PID socket path we own and must remove on cleanup.
+    /// `None` in daemon mode (the daemon owns its own socket).
+    legacy_socket_path: Option<PathBuf>,
 }
 
 impl Default for AccelerometerState {
@@ -72,28 +81,135 @@ impl AccelerometerState {
         if helper.exists() {
             return Ok(helper);
         }
+        Err(format!("Helper binary not found at {}", helper.display()))
+    }
+
+    /// True when the app is running from a production install location where the
+    /// LaunchDaemon flow is appropriate. Dev builds under `target/` fall back to
+    /// the legacy per-session osascript flow.
+    fn is_production_install(helper_path: &Path) -> bool {
+        helper_path.starts_with("/Applications/")
+    }
+
+    /// Render the LaunchDaemon plist with the current helper path baked in.
+    fn daemon_plist(helper_path: &Path) -> String {
+        let helper_str = helper_path.display().to_string();
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{DAEMON_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{helper_str}</string>
+        <string>--daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>StandardErrorPath</key>
+    <string>/tmp/knockknock-helper.err.log</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/knockknock-helper.out.log</string>
+</dict>
+</plist>
+"#
+        )
+    }
+
+    /// Check whether the installed LaunchDaemon plist matches the current helper
+    /// path. Returns false if the plist is missing or points somewhere stale
+    /// (e.g. the user reinstalled to a different location).
+    fn daemon_is_current(helper_path: &Path) -> bool {
+        let contents = match std::fs::read_to_string(DAEMON_PLIST_PATH) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        contents.contains(&helper_path.display().to_string())
+    }
+
+    /// Install or reinstall the LaunchDaemon. Triggers a single `osascript`
+    /// admin-privileges prompt — the user sees the native macOS password dialog
+    /// once, after which the daemon persists across reboots.
+    fn install_daemon(helper_path: &Path) -> Result<(), String> {
+        let plist_contents = Self::daemon_plist(helper_path);
+
+        let tmp_plist = std::env::temp_dir().join(format!("{DAEMON_LABEL}.plist"));
+        std::fs::write(&tmp_plist, plist_contents)
+            .map_err(|e| format!("Failed to write temp plist: {e}"))?;
+        let tmp_str = tmp_plist.display().to_string();
+
+        // Bootout ignores errors (first install has nothing to unload). Then
+        // install the fresh plist with root:wheel 0644 and bootstrap it.
+        let shell_cmd = format!(
+            "/bin/launchctl bootout system {DAEMON_PLIST_PATH} 2>/dev/null; \
+             /bin/cp '{tmp_str}' '{DAEMON_PLIST_PATH}' && \
+             /usr/sbin/chown root:wheel '{DAEMON_PLIST_PATH}' && \
+             /bin/chmod 644 '{DAEMON_PLIST_PATH}' && \
+             /bin/launchctl bootstrap system '{DAEMON_PLIST_PATH}'"
+        );
+
+        let escaped = shell_cmd.replace('\\', "\\\\").replace('"', "\\\"");
+        let apple_script = format!("do shell script \"{escaped}\" with administrator privileges");
+
+        eprintln!("[Accel] Installing LaunchDaemon (password prompt)...");
+        let output = Command::new("osascript")
+            .args(["-e", &apple_script])
+            .output()
+            .map_err(|e| format!("osascript failed: {e}"))?;
+
+        let _ = std::fs::remove_file(&tmp_plist);
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("User canceled") || stderr.contains("-128") {
+                return Err("User canceled administrator authorization".into());
+            }
+            return Err(format!("Daemon install failed: {stderr}"));
+        }
+
+        Ok(())
+    }
+
+    /// Poll for the daemon socket to appear after bootstrap. launchd starts the
+    /// daemon asynchronously, so we give it a few seconds before giving up.
+    fn wait_for_daemon_socket(timeout: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if Path::new(DAEMON_SOCKET_PATH).exists() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
         Err(format!(
-            "Helper binary not found at {}",
-            helper.display()
+            "Daemon socket {DAEMON_SOCKET_PATH} did not appear within {:?}",
+            timeout
         ))
     }
 
-    /// Create a Unix domain socket for helper communication.
-    fn create_socket() -> Result<(UnixListener, PathBuf), String> {
-        let path = PathBuf::from(format!(
-            "/tmp/knockknock-accel-{}.sock",
-            std::process::id()
-        ));
-        if path.exists() {
-            let _ = std::fs::remove_file(&path);
+    /// Production path — ensure the daemon is installed+running, then connect.
+    /// Returns a connected stream ready for the reader thread.
+    fn connect_daemon(helper_path: &Path) -> Result<UnixStream, String> {
+        if !Self::daemon_is_current(helper_path) {
+            Self::install_daemon(helper_path)?;
+            Self::wait_for_daemon_socket(Duration::from_secs(10))?;
+        } else if !Path::new(DAEMON_SOCKET_PATH).exists() {
+            // Plist is current but socket missing — daemon may be restarting.
+            Self::wait_for_daemon_socket(Duration::from_secs(5))?;
         }
-        let listener =
-            UnixListener::bind(&path).map_err(|e| format!("Failed to bind socket: {e}"))?;
-        Ok((listener, path))
+
+        UnixStream::connect(DAEMON_SOCKET_PATH)
+            .map_err(|e| format!("Failed to connect to daemon at {DAEMON_SOCKET_PATH}: {e}"))
     }
 
-    /// Launch the helper via osascript (shows macOS native password dialog).
-    fn launch_helper(
+    /// Legacy dev path — create a per-PID listener and launch the helper via
+    /// osascript. Kept verbatim from the original flow for non-production builds.
+    fn legacy_launch_helper(
         helper_path: &PathBuf,
         socket_path: &PathBuf,
     ) -> JoinHandle<Result<(), String>> {
@@ -107,7 +223,7 @@ impl AccelerometerState {
                     "do shell script \"'{}' '{}'\" with administrator privileges",
                     helper_str, socket_str
                 );
-                eprintln!("[Accel] Launching helper via osascript...");
+                eprintln!("[Accel] Launching legacy helper via osascript...");
                 let output = Command::new("osascript")
                     .args(["-e", &script])
                     .output()
@@ -125,12 +241,25 @@ impl AccelerometerState {
             .expect("Failed to spawn osascript thread")
     }
 
+    fn create_legacy_socket() -> Result<(UnixListener, PathBuf), String> {
+        let path = PathBuf::from(format!(
+            "/tmp/knockknock-accel-{}.sock",
+            std::process::id()
+        ));
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+        let listener =
+            UnixListener::bind(&path).map_err(|e| format!("Failed to bind socket: {e}"))?;
+        Ok((listener, path))
+    }
+
     /// Wait for helper to connect, with timeout and cancellation.
-    fn accept_with_timeout(
+    fn legacy_accept_with_timeout(
         listener: &UnixListener,
         alive: &AtomicBool,
         timeout: Duration,
-    ) -> Result<std::os::unix::net::UnixStream, String> {
+    ) -> Result<UnixStream, String> {
         listener
             .set_nonblocking(true)
             .map_err(|e| format!("Failed to set non-blocking: {e}"))?;
@@ -160,23 +289,24 @@ impl AccelerometerState {
         }
     }
 
-    /// Ensure the privileged helper is running. Launches it on first call;
-    /// subsequent calls are no-ops unless the helper crashed.
+    /// Ensure the helper connection is active. Lazily installs the daemon on
+    /// first production run or, in dev builds, launches the helper via osascript.
     fn ensure_helper<R: Runtime>(&self, app: AppHandle<R>) -> Result<(), String> {
         let mut guard = self.inner.lock().map_err(|e| e.to_string())?;
 
-        // Check if existing helper is still alive
+        // Reuse an existing live connection.
         if let Some(ref state) = *guard {
             if state.alive.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            // Helper died — clean up before relaunching
-            eprintln!("[Accel] Helper disconnected, relaunching...");
+            eprintln!("[Accel] Existing connection dead, re-establishing...");
         }
 
-        // Clean up stale state (if any)
+        // Drop any dead state first.
         if let Some(old) = guard.take() {
-            let _ = std::fs::remove_file(&old.socket_path);
+            if let Some(path) = &old.legacy_socket_path {
+                let _ = std::fs::remove_file(path);
+            }
             if let Some(t) = old.reader_thread {
                 let _ = t.join();
             }
@@ -186,7 +316,7 @@ impl AccelerometerState {
         }
 
         let helper_path = Self::resolve_helper_path()?;
-        let (listener, socket_path) = Self::create_socket()?;
+        let use_daemon = Self::is_production_install(&helper_path);
 
         let alive = Arc::new(AtomicBool::new(true));
         let emitting = Arc::new(AtomicBool::new(false));
@@ -194,51 +324,47 @@ impl AccelerometerState {
         let calibration_samples: Arc<Mutex<Vec<AccelSample>>> =
             Arc::new(Mutex::new(Vec::with_capacity(200)));
 
-        let osascript_thread = Self::launch_helper(&helper_path, &socket_path);
+        let (stream, osascript_thread, legacy_socket_path) = if use_daemon {
+            let stream = Self::connect_daemon(&helper_path)?;
+            eprintln!("[Accel] Connected to LaunchDaemon at {DAEMON_SOCKET_PATH}");
+            (stream, None, None)
+        } else {
+            eprintln!("[Accel] Dev mode — using legacy osascript flow");
+            let (listener, socket_path) = Self::create_legacy_socket()?;
+            let osascript_thread = Self::legacy_launch_helper(&helper_path, &socket_path);
 
-        // Spawn reader thread
+            // Wait for the launched helper to connect back.
+            let stream = Self::legacy_accept_with_timeout(
+                &listener,
+                &alive,
+                Duration::from_secs(30),
+            )?;
+            (stream, Some(osascript_thread), Some(socket_path))
+        };
+
+        // Reader thread — identical logic for daemon and legacy modes once the
+        // stream is established.
         let alive_clone = alive.clone();
         let emitting_clone = emitting.clone();
         let calibrating_clone = calibrating.clone();
         let samples_clone = calibration_samples.clone();
-        let socket_path_clone = socket_path.clone();
+        let legacy_socket_clone = legacy_socket_path.clone();
         let start_time = Instant::now();
 
         let reader_thread = thread::Builder::new()
             .name("accel-reader".into())
             .spawn(move || {
-                eprintln!("[Accel] Waiting for helper to connect...");
-                let stream = match Self::accept_with_timeout(
-                    &listener,
-                    &alive_clone,
-                    Duration::from_secs(30),
-                ) {
-                    Ok(s) => {
-                        eprintln!("[Accel] Helper connected");
-                        s
-                    }
-                    Err(e) => {
-                        eprintln!("[Accel] {e}");
-                        let _ = app.emit("accelerometer://error", &e);
-                        alive_clone.store(false, Ordering::Relaxed);
-                        let _ = std::fs::remove_file(&socket_path_clone);
-                        return;
-                    }
-                };
-
-                stream
-                    .set_read_timeout(Some(Duration::from_millis(500)))
-                    .ok();
-
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
                 let mut buf = [0u8; 24];
                 let mut count: u64 = 0;
+                let mut stream = stream;
 
                 loop {
                     if !alive_clone.load(Ordering::Relaxed) {
                         break;
                     }
 
-                    match (&stream).read_exact(&mut buf) {
+                    match stream.read_exact(&mut buf) {
                         Ok(()) => {
                             count += 1;
                             let x = f64::from_le_bytes(buf[0..8].try_into().unwrap());
@@ -246,22 +372,18 @@ impl AccelerometerState {
                             let z = f64::from_le_bytes(buf[16..24].try_into().unwrap());
 
                             if count == 1 {
-                                eprintln!(
-                                    "[Accel] First sample: x={x:.4} y={y:.4} z={z:.4}"
-                                );
+                                eprintln!("[Accel] First sample: x={x:.4} y={y:.4} z={z:.4}");
                             }
                             if count % 500 == 0 {
                                 eprintln!("[Accel] Received {count} samples");
                             }
 
-                            // Collect calibration samples
                             if calibrating_clone.load(Ordering::Relaxed) {
                                 if let Ok(mut samples) = samples_clone.lock() {
                                     samples.push(AccelSample { x, y, z });
                                 }
                             }
 
-                            // Emit events when monitoring is active
                             if emitting_clone.load(Ordering::Relaxed) {
                                 let event = AccelerometerEvent {
                                     x,
@@ -279,14 +401,16 @@ impl AccelerometerState {
                             continue;
                         }
                         Err(_) => {
-                            eprintln!("[Accel] Helper disconnected after {count} samples");
+                            eprintln!("[Accel] Connection closed after {count} samples");
                             break;
                         }
                     }
                 }
 
                 alive_clone.store(false, Ordering::Relaxed);
-                let _ = std::fs::remove_file(&socket_path_clone);
+                if let Some(path) = legacy_socket_clone {
+                    let _ = std::fs::remove_file(path);
+                }
             })
             .map_err(|e| format!("Failed to spawn reader thread: {e}"))?;
 
@@ -296,14 +420,14 @@ impl AccelerometerState {
             calibrating,
             calibration_samples,
             reader_thread: Some(reader_thread),
-            osascript_thread: Some(osascript_thread),
-            socket_path,
+            osascript_thread,
+            legacy_socket_path,
         });
 
         Ok(())
     }
 
-    /// Start emitting accelerometer events. Launches helper on first call.
+    /// Start emitting accelerometer events. Ensures the helper is connected.
     pub fn start<R: Runtime>(&self, app: AppHandle<R>) -> Result<(), String> {
         self.ensure_helper(app)?;
 
@@ -314,7 +438,7 @@ impl AccelerometerState {
         Ok(())
     }
 
-    /// Stop emitting accelerometer events. Helper stays alive for reuse.
+    /// Stop emitting accelerometer events. Helper/daemon stays alive for reuse.
     pub fn stop(&self) -> Result<(), String> {
         let guard = self.inner.lock().map_err(|e| e.to_string())?;
         if let Some(ref state) = *guard {
@@ -324,7 +448,6 @@ impl AccelerometerState {
     }
 
     /// Collect samples for 1 second and return the average baseline.
-    /// Reuses the existing helper connection (no extra password prompt).
     pub async fn calibrate<R: Runtime>(
         &self,
         app: AppHandle<R>,
@@ -335,24 +458,19 @@ impl AccelerometerState {
             let guard = self.inner.lock().map_err(|e| e.to_string())?;
             let state = guard.as_ref().ok_or("Helper not running")?;
 
-            // Pause event emission during calibration
             state.emitting.store(false, Ordering::Relaxed);
-
             (state.calibrating.clone(), state.calibration_samples.clone())
         };
 
-        // Clear old samples and start collecting
         if let Ok(mut samples) = calibration_samples.lock() {
             samples.clear();
         }
         calibrating.store(true, Ordering::Relaxed);
 
-        // Collect for 1 second
         thread::sleep(Duration::from_secs(1));
 
         calibrating.store(false, Ordering::Relaxed);
 
-        // Compute average
         let guard = calibration_samples.lock().map_err(|e| e.to_string())?;
 
         if guard.is_empty() {

@@ -2,25 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalibrationView } from "./components/CalibrationView";
-import { PurchaseScreen } from "./components/PurchaseScreen";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { TrialBanner } from "./components/TrialBanner";
 import { ActionExecutor } from "./core/action-executor";
 import { ActionMapper } from "./core/action-mapper";
 import { useAccelerometer } from "./hooks/useAccelerometer";
 import { LocaleContext } from "./hooks/useLocale";
 import { useSettings } from "./hooks/useSettings";
 import { useTapDetector } from "./hooks/useTapDetector";
-import { useTrial } from "./hooks/useTrial";
 import type { CalibrationBaseline, TapCount } from "./lib/types";
 
+// Trial/purchase flow is parked until the licensing model is ready.
+const isLicensed = true;
+
 function App() {
-	const {
-		trialState,
-		isLicensed,
-		activate,
-		isLoading: trialLoading,
-	} = useTrial();
 	const {
 		settings,
 		updateSettings,
@@ -35,7 +29,6 @@ function App() {
 		error: accelError,
 	} = useAccelerometer();
 
-	const [showPurchase, setShowPurchase] = useState(false);
 	const [showCalibration, setShowCalibration] = useState(false);
 	const [pendingSection, setPendingSection] = useState<string | null>(null);
 
@@ -69,8 +62,7 @@ function App() {
 		settings?.monitoringEnabled !== false &&
 		accelAvailable &&
 		settings?.hasCompletedCalibration === true &&
-		!showCalibration &&
-		(isLicensed || trialState?.status !== "expired");
+		!showCalibration;
 
 	// Sync monitoring state to tray menu label
 	useEffect(() => {
@@ -138,13 +130,6 @@ function App() {
 		}
 	}, [settingsLoading, settings]);
 
-	// Show purchase screen when trial expires
-	useEffect(() => {
-		if (trialState?.status === "expired" && !isLicensed) {
-			setShowPurchase(true);
-		}
-	}, [trialState, isLicensed]);
-
 	// Handle calibration completion
 	const handleCalibrationComplete = useCallback(
 		async (result: { baseline: CalibrationBaseline; threshold: number }) => {
@@ -159,22 +144,10 @@ function App() {
 		[updateSettings],
 	);
 
-	// Handle license activation
-	const handleActivate = useCallback(
-		async (key: string): Promise<boolean> => {
-			const valid = await activate(key);
-			if (valid) {
-				setShowPurchase(false);
-			}
-			return valid;
-		},
-		[activate],
-	);
-
 	const locale = settings?.locale ?? "ko";
 
 	// Loading state
-	if (trialLoading || settingsLoading) {
+	if (settingsLoading) {
 		return (
 			<div className="min-h-screen bg-gray-950 flex items-center justify-center">
 				<div className="text-gray-400 text-sm">Loading...</div>
@@ -199,30 +172,12 @@ function App() {
 		);
 	}
 
-	// Purchase screen (trial expired)
-	if (showPurchase && !isLicensed) {
-		return (
-			<LocaleContext.Provider value={locale}>
-				<PurchaseScreen onActivate={handleActivate} />
-			</LocaleContext.Provider>
-		);
-	}
-
 	// Main app — settings panel
 	if (!settings) return null;
 
 	return (
 		<LocaleContext.Provider value={locale}>
 			<div className="min-h-screen bg-gray-950">
-				{/* Trial banner */}
-				{trialState && !isLicensed && (
-					<TrialBanner
-						trialState={trialState}
-						onPurchase={() => setShowPurchase(true)}
-					/>
-				)}
-
-				{/* Settings panel */}
 				<SettingsPanel
 					settings={settings}
 					onUpdateSettings={updateSettings}

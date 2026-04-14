@@ -95,7 +95,6 @@ unsafe extern "C" {
 
 const USAGE_PAGE_VENDOR: i32 = 0xFF00;
 const USAGE_ACCELEROMETER: i32 = 3;
-const REPORT_LENGTH: usize = 22;
 
 /// Parsed accelerometer sample in g-force units.
 #[derive(Debug, Clone, Copy)]
